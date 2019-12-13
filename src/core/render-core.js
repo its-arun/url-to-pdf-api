@@ -3,6 +3,21 @@ const _ = require('lodash');
 const config = require('../config');
 const logger = require('../util/logger')(__filename);
 
+
+async function createBrowser(opts) {
+  const browserOpts = {
+    ignoreHTTPSErrors: opts.ignoreHttpsErrors,
+    sloMo: config.DEBUG_MODE ? 250 : undefined,
+  };
+  if (config.BROWSER_WS_ENDPOINT) {
+    browserOpts.browserWSEndpoint = config.BROWSER_WS_ENDPOINT;
+    return puppeteer.connect(browserOpts);
+  }
+  browserOpts.headless = !config.DEBUG_MODE;
+  browserOpts.args = ['--disable-gpu', '--no-sandbox', '--disable-setuid-sandbox'];
+  return puppeteer.launch(browserOpts);
+}
+
 async function render(_opts = {}) {
   const opts = _.merge({
     cookies: [],
@@ -37,12 +52,7 @@ async function render(_opts = {}) {
 
   logOpts(opts);
 
-  const browser = await puppeteer.launch({
-    headless: !config.DEBUG_MODE,
-    ignoreHTTPSErrors: opts.ignoreHttpsErrors,
-    args: ['--disable-gpu', '--no-sandbox', '--disable-setuid-sandbox'],
-    sloMo: config.DEBUG_MODE ? 250 : undefined,
-  });
+  const browser = await createBrowser(opts);
   const page = await browser.newPage();
 
   page.on('console', (...args) => logger.info('PAGE LOG:', ...args));
@@ -81,15 +91,18 @@ async function render(_opts = {}) {
       await page.emulateMedia('screen');
     }
 
-    logger.info('Setting cookies..');
-    opts.cookies.map(async (cookie) => {
-      await page.setCookie(cookie);
-    });
+    if (opts.cookies && opts.cookies.length > 0) {
+      logger.info('Setting cookies..');
+
+      const client = await page.target().createCDPSession();
+
+      await client.send('Network.enable');
+      await client.send('Network.setCookies', { cookies: opts.cookies });
+    }
 
     if (opts.html) {
       logger.info('Set HTML ..');
-      // https://github.com/GoogleChrome/puppeteer/issues/728
-      await page.goto(`data:text/html;charset=UTF-8,${opts.html}`, opts.goto);
+      await page.setContent(opts.html, opts.goto);
     } else {
       logger.info(`Goto url ${opts.url} ..`);
       await page.goto(opts.url, opts.goto);
@@ -142,12 +155,11 @@ async function render(_opts = {}) {
       const screenshotOpts = _.cloneDeep(_.omit(opts.screenshot, ['clip']));
       const clipContainsSomething = _.some(opts.screenshot.clip, val => !_.isUndefined(val));
       if (clipContainsSomething) {
-        screenshotOpts.clip = opts.screenshot.clip
+        screenshotOpts.clip = opts.screenshot.clip;
       }
 
       data = await page.screenshot(screenshotOpts);
     }
-
   } catch (err) {
     logger.error(`Error when rendering page: ${err}`);
     logger.error(err.stack);
