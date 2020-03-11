@@ -13,6 +13,9 @@ async function createBrowser(opts) {
     browserOpts.browserWSEndpoint = config.BROWSER_WS_ENDPOINT;
     return puppeteer.connect(browserOpts);
   }
+  if (config.BROWSER_EXECUTABLE_PATH) {
+    browserOpts.executablePath = config.BROWSER_EXECUTABLE_PATH;
+  }
   browserOpts.headless = !config.DEBUG_MODE;
   browserOpts.args = ['--disable-gpu', '--no-sandbox', '--disable-setuid-sandbox'];
   return puppeteer.launch(browserOpts);
@@ -149,6 +152,8 @@ async function render(_opts = {}) {
 
     if (opts.output === 'pdf') {
       data = await page.pdf(opts.pdf);
+    } else if (opts.output === 'html') {
+      data = await page.evaluate(() => document.body.innerHTML);
     } else {
       // This is done because puppeteer throws an error if fullPage and clip is used at the same
       // time even though clip is just empty object {}
